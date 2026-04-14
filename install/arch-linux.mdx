@@ -1,0 +1,119 @@
+---
+title: "Install i915 SR-IOV DKMS on Arch Linux (AUR or pacman)"
+description: "Step-by-step installation guide for i915 SR-IOV DKMS on Arch Linux hosts using AUR or pacman to enable Intel GPU virtual function passthrough."
+---
+
+This guide walks you through installing the i915 SR-IOV DKMS module on an Arch Linux host. After completing these steps, your Intel integrated GPU will expose Virtual Functions (VFs) that you can pass through to virtual machines. The module is available directly from the AUR, or as a pre-built package from the GitHub releases page.
+
+## Installation
+
+<Steps>
+  <Step title="Install kernel headers">
+    Install the headers package that matches your running kernel. Replace the package name if you are using a non-default kernel variant:
+
+    <Tabs>
+      <Tab title="linux (default)">
+        ```bash
+        sudo pacman -S linux-headers
+        ```
+      </Tab>
+      <Tab title="linux-zen">
+        ```bash
+        sudo pacman -S linux-zen-headers
+        ```
+      </Tab>
+      <Tab title="linux-lts">
+        ```bash
+        sudo pacman -S linux-lts-headers
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install i915-sriov-dkms">
+    You can install the module from the AUR using `yay`, or download a pre-built package from the releases page and install it with `pacman`.
+
+    <Tabs>
+      <Tab title="AUR (yay)">
+        ```bash
+        yay -S i915-sriov-dkms
+        ```
+      </Tab>
+      <Tab title="Releases page (pacman -U)">
+        Download the pre-built package from the [releases page](https://github.com/strongtz/i915-sriov-dkms/releases), then install it with `pacman -U`:
+
+        ```bash
+        sudo pacman -U /path/to/downloaded-package.pkg.tar.zst
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Add kernel parameters">
+    You need to pass additional parameters to the kernel at boot. The exact method depends on your bootloader — refer to the [Arch Wiki guide on kernel parameters](https://wiki.archlinux.org/title/Kernel_parameters) for bootloader-specific instructions.
+
+    For full details on which parameters to use and the difference between the `i915` and `xe` drivers, see [Kernel Parameters](/configuration/kernel-parameters).
+
+    A typical set of parameters for the `i915` driver looks like:
+
+    ```
+    intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe
+    ```
+  </Step>
+
+  <Step title="Regenerate initramfs">
+    Rebuild all initramfs images so the new module is included at boot:
+
+    ```bash
+    sudo mkinitcpio -P
+    ```
+  </Step>
+
+  <Step title="Configure VF count at boot (optional)">
+    The package installs a `systemd-tmpfiles` configuration file at `/etc/tmpfiles.d/i915-set-sriov-numvfs.conf`. By default, the active line is commented out. Edit the file and uncomment it, setting the argument to the number of VFs you want created on every boot (maximum 7):
+
+    ```conf
+    # /etc/tmpfiles.d/i915-set-sriov-numvfs.conf
+    #Path                                              Mode UID  GID  Age Argument
+    w /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs -    -    -    -   7
+    ```
+
+    <Note>
+      Adjust the PCI address (`0000:00:02.0`) if your GPU appears at a different address. Run `lspci | grep -i vga` to confirm.
+    </Note>
+
+    To apply the configuration immediately without rebooting:
+
+    ```bash
+    sudo systemd-tmpfiles --create
+    ```
+  </Step>
+
+  <Step title="Reboot">
+    Reboot the host to load the new kernel parameters and the DKMS module:
+
+    ```bash
+    sudo reboot
+    ```
+  </Step>
+</Steps>
+
+## Optional configurations
+
+### Block VFs on the host
+
+Leaving VFs visible to the host can cause system instability and driver conflicts. Because VFs serve no purpose on the host itself, it is strongly recommended that you block them from the host OS. Follow the [Block VFs setup guide](/configuration/block-vfs) to apply this configuration.
+
+## Uninstallation
+
+Remove the package with pacman:
+
+```bash
+sudo pacman -R i915-sriov-dkms
+```
+
+If the package manager fails to remove the module from the kernel tree, or if you need to force removal after a manual install, use the DKMS command directly:
+
+```bash
+sudo dkms remove i915-sriov-dkms/2026.03.05
+```

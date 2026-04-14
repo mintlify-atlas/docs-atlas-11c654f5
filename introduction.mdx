@@ -1,0 +1,48 @@
+---
+title: "i915 SR-IOV DKMS: Intel GPU virtualization overview"
+description: "A community DKMS module that patches Intel i915 and xe GPU drivers with SR-IOV support, enabling hardware GPU virtualization with up to 7 VFs on Linux."
+---
+
+i915 SR-IOV DKMS is a community-maintained kernel module that takes a snapshot of the Intel i915 and xe GPU drivers from the mainline Linux kernel and patches them with SR-IOV (Single Root I/O Virtualization) support ported from Intel's internal `mainline-tracking` tree. It is distributed as a DKMS package (`i915-sriov-dkms`, version `2026.03.05`), so the module rebuilds automatically whenever you install a new kernel — no manual recompilation needed.
+
+## What is SR-IOV?
+
+SR-IOV is a PCI-SIG standard that lets a single physical PCIe device present itself as multiple independent virtual devices. Applied to an Intel integrated GPU, SR-IOV allows you to carve out up to 7 Virtual Functions (VFs) from the one physical GPU. Each VF can be assigned directly to a separate virtual machine, giving that VM hardware-accelerated graphics, video transcoding, and compute access — without emulation overhead.
+
+## What this module provides
+
+Installing `i915-sriov-dkms` builds and registers four kernel modules:
+
+| Module | Purpose |
+|---|---|
+| `i915` | Patched legacy Intel GPU driver with SR-IOV host support |
+| `xe` | Patched newer Intel GPU driver (Gen 12.5+) with SR-IOV host support |
+| `kvmgt` | KVM guest virtio-GPU backend, used alongside i915 |
+| `intel_sriov_compat` | Compatibility shim that backports SR-IOV infrastructure |
+
+You choose between the `i915` and `xe` drivers at boot via kernel parameters. The current version supports kernels in the **6.12–6.19** range.
+
+## Community project disclaimer
+
+<Warning>
+  This module is **highly experimental** and is a community project. It is **not** affiliated with, endorsed by, or connected to Intel Corporation. It may contain unstable features and could cause system instability. Use it only if you understand the risks and know what you are doing.
+
+  You must install this DKMS module on **both the host machine and every guest VM** that will use a Virtual Function. Installing on the host alone is not sufficient.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Requirements" icon="list-check" href="/requirements">
+    Check kernel version, hardware, and build dependencies before you start
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install the module, set kernel parameters, and verify SR-IOV is working
+  </Card>
+  <Card title="Arch Linux host" icon="server" href="/install/arch-linux">
+    Step-by-step installation guide for Arch Linux hosts
+  </Card>
+  <Card title="Proxmox host" icon="server" href="/install/proxmox">
+    Step-by-step installation guide for Proxmox PVE 9.1 hosts
+  </Card>
+</CardGroup>

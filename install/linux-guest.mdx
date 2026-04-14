@@ -1,0 +1,115 @@
+---
+title: "Install i915 SR-IOV DKMS in a Linux guest virtual machine"
+description: "How to install the i915 SR-IOV DKMS module inside a Linux guest VM to enable hardware-accelerated GPU access from a Virtual Function."
+---
+
+The same DKMS module that runs on the host must also run inside the guest VM. Without it, the Linux kernel inside the guest has no driver capable of using the passed-through Virtual Function (VF), so the GPU remains inaccessible. Follow the steps below to build and install the module, configure kernel parameters to activate i915 and blacklist the competing xe driver, and verify that the VF is recognized.
+
+<Steps>
+  <Step title="Install build tools">
+    Install the packages needed to compile and manage DKMS modules:
+
+    ```bash
+    apt install build-essential dkms linux-headers-$(uname -r)
+    ```
+  </Step>
+
+  <Step title="Download and install the .deb package">
+    Download the pre-built Debian package for version 2026.03.05 and install it:
+
+    ```bash
+    wget -O /tmp/i915-sriov-dkms_2026.03.05_amd64.deb \
+      "https://github.com/strongtz/i915-sriov-dkms/releases/download/2026.03.05/i915-sriov-dkms_2026.03.05_amd64.deb"
+    dpkg -i /tmp/i915-sriov-dkms_2026.03.05_amd64.deb
+    ```
+  </Step>
+
+  <Step title="Update kernel parameters">
+    Open `/etc/default/grub` in a text editor:
+
+    ```bash
+    nano /etc/default/grub
+    ```
+
+    Set `GRUB_CMDLINE_LINUX_DEFAULT` to include `i915.enable_guc=3` and `module_blacklist=xe`. If you already have other arguments in that variable, append these two rather than replacing the entire line:
+
+    ```
+    GRUB_CMDLINE_LINUX_DEFAULT="i915.enable_guc=3 module_blacklist=xe"
+    ```
+  </Step>
+
+  <Step title="Apply GRUB and initramfs changes, then reboot">
+    Regenerate the GRUB configuration and the initial RAM filesystem, then restart the VM:
+
+    ```bash
+    update-grub
+    update-initramfs -u
+    ```
+
+    After both commands complete, reboot the VM.
+  </Step>
+
+  <Step title="Verify the VF is recognized">
+    Once the VM is back up, check the kernel log to confirm i915 loaded and found the VF:
+
+    ```bash
+    dmesg | grep i915
+    ```
+
+    <Note>
+      You should see a line like the following in the output, which confirms you are running the SR-IOV-capable build of the module:
+
+      ```
+      i915: You are using the i915-sriov-dkms module, a ported version of the i915/xe module with SR-IOV support.
+      ```
+    </Note>
+  </Step>
+
+  <Step title="Confirm the correct driver is in use">
+    Run `lspci -nnk` and look for your VF device. The `Kernel driver in use` field should show `i915`, and `xe` should not appear:
+
+    ```bash
+    lspci -nnk
+    ```
+
+    If xe still appears as the active driver, double-check that `module_blacklist=xe` is present in your kernel command line (`cat /proc/cmdline`) and that you ran `update-grub` and `update-initramfs -u` before rebooting.
+  </Step>
+
+  <Step title="Optional: verify VAAPI acceleration">
+    Install `vainfo` and run it to confirm that the GPU is exposed through the Video Acceleration API:
+
+    ```bash
+    apt install vainfo
+    vainfo
+    ```
+
+    <Tip>
+      VAAPI is the interface used by applications such as Jellyfin, Plex, FFmpeg, and HandBrake for hardware video transcoding. Confirming that `vainfo` reports your Intel GPU here means those applications can offload encode and decode work to the VF rather than using the CPU.
+    </Tip>
+  </Step>
+
+  <Step title="Optional: install OpenCL support">
+    If you need GPU-accelerated compute workloads via OpenCL, install the Intel OpenCL runtime and the `clinfo` diagnostic tool:
+
+    ```bash
+    apt install intel-opencl-icd clinfo
+    clinfo
+    ```
+
+    `clinfo` will list all available OpenCL platforms and devices. Your Intel GPU should appear as a device under the Intel platform.
+  </Step>
+</Steps>
+
+## Uninstallation
+
+Remove the package with:
+
+```bash
+dpkg -P i915-sriov-dkms
+```
+
+If you installed the module manually, or if the package manager fails to remove it from the kernel tree, remove it forcibly with DKMS:
+
+```bash
+dkms remove i915-sriov-dkms/2026.03.05
+```

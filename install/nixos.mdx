@@ -1,0 +1,100 @@
+---
+title: "Install i915 SR-IOV on NixOS using the flake module"
+description: "How to enable Intel GPU SR-IOV on NixOS using the i915-sriov-dkms Nix flake module, without DKMS, for the i915 and xe kernel drivers."
+---
+
+NixOS users do not use DKMS to install the i915 SR-IOV module. Instead, the project provides a [Nix flake](https://github.com/strongtz/i915-sriov-dkms) with a NixOS module that makes the kernel drivers available as derivations in your `pkgs` attribute set. The two available packages are `pkgs.i915-sriov` (for the `i915` driver) and `pkgs.xe-sriov` (for the `xe` driver). You include them in your configuration via `boot.extraModulePackages`, and NixOS handles building and loading the modules against your configured kernel.
+
+<Note>
+  This installation method uses the Nix flake directly. There is no DKMS involved — the module is built as a standard Nix derivation alongside your system configuration.
+</Note>
+
+## How the flake module works
+
+The flake exposes `nixosModules.default`, which adds a nixpkgs overlay to your configuration. That overlay injects `i915-sriov` and `xe-sriov` into `pkgs` by calling `config.boot.kernelPackages.callPackage` with the respective module derivations. This means the modules are always built against the exact kernel you have configured, avoiding version mismatches.
+
+The relevant part of the flake output is:
+
+```nix
+nixosModules.default =
+  { config, ... }:
+  {
+    nixpkgs.overlays = [
+      (final: prev: {
+        i915-sriov = config.boot.kernelPackages.callPackage i915Module { };
+        xe-sriov = config.boot.kernelPackages.callPackage xeModule { };
+      })
+    ];
+  };
+```
+
+## Installation
+
+### 1. Add the flake to your inputs
+
+In your `flake.nix`, add `i915-sriov-dkms` as an input. Set `inputs.nixpkgs.follows = "nixpkgs"` to ensure the flake uses the same nixpkgs version as your system configuration and avoid kernel version mismatches:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    i915-sriov-dkms = {
+      url = "github:strongtz/i915-sriov-dkms";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { self, nixpkgs, i915-sriov-dkms, ... }: {
+    nixosConfigurations.my-host = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        i915-sriov-dkms.nixosModules.default
+        ./configuration.nix
+      ];
+    };
+  };
+}
+```
+
+### 2. Enable the kernel modules
+
+In your NixOS configuration (e.g., `configuration.nix`), add the SR-IOV modules to `boot.extraModulePackages`:
+
+```nix
+boot.extraModulePackages = [ pkgs.i915-sriov pkgs.xe-sriov ];
+```
+
+You can include one or both modules. If you only intend to use the `i915` driver, you can omit `pkgs.xe-sriov`, and vice versa.
+
+### 3. Set kernel parameters
+
+You must also pass the required kernel parameters for SR-IOV to function. Set them in your NixOS boot configuration:
+
+```nix
+boot.kernelParams = [
+  "intel_iommu=on"
+  "i915.enable_guc=3"
+  "i915.max_vfs=7"
+  "module_blacklist=xe"
+];
+```
+
+<Tip>
+  To use the `xe` driver instead of `i915`, replace the parameters with `xe.max_vfs=7`, `xe.force_probe=<device_id>`, and `module_blacklist=i915`. Note that `xe` does not support Meteor Lake (MTL) or Lunar Lake (LNL) platforms. Run `cat /sys/devices/pci0000:00/0000:00:02.0/device` to get your device ID.
+</Tip>
+
+### 4. Rebuild and reboot
+
+Apply the new configuration and reboot:
+
+```bash
+sudo nixos-rebuild switch
+sudo reboot
+```
+
+## Optional configurations
+
+### Block VFs on the host
+
+Leaving VFs visible to the host can cause system instability and driver conflicts. Because VFs serve no functional purpose on the host itself, it is strongly recommended that you block them. Follow the [Block VFs setup guide](/configuration/block-vfs) to apply this configuration.

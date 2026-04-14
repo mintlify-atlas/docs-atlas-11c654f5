@@ -1,0 +1,60 @@
+---
+title: "Configure UEFI Secure Boot with MOK for i915 SR-IOV"
+description: "How to enroll the DKMS-generated MOK key to load the i915 SR-IOV module with UEFI Secure Boot enabled on Ubuntu, Proxmox, or Debian."
+---
+
+Out-of-tree kernel modules cannot be loaded when UEFI Secure Boot is active unless they are signed by a key that the firmware trusts. When you install i915-sriov-dkms, DKMS automatically generates a self-signed Machine Owner Key (MOK) certificate and uses it to sign the built modules. You need to enroll that certificate in the UEFI firmware once so that subsequent boots accept the signed module without any further intervention.
+
+<Info>
+  DKMS generates the MOK key pair automatically during installation. You do not need to create or manage a signing key yourself — the only action required from you is enrolling the public certificate in the firmware.
+</Info>
+
+<Note>
+  This procedure applies to Ubuntu, Proxmox VE, and other Debian-based distributions. Arch Linux users should refer to the [Arch Wiki Secure Boot guide](https://wiki.archlinux.org/title/Unified_Extensible_Firmware_Interface/Secure_Boot#shim) instead.
+</Note>
+
+**Precondition:** UEFI Secure Boot must already be turned on and set to User/Standard Mode before you begin.
+
+<Steps>
+  <Step title="Install mokutil">
+    ```bash
+    sudo apt update && sudo apt install mokutil
+    ```
+  </Step>
+
+  <Step title="Install i915-sriov-dkms">
+    Follow the standard installation guide for your distribution. DKMS will build the module and sign it with the auto-generated MOK key.
+  </Step>
+
+  <Step title="Import the MOK public key">
+    Before rebooting, register the DKMS certificate with the MOK manager:
+
+    ```bash
+    sudo mokutil --import /var/lib/dkms/mok.pub
+    ```
+
+    You will be prompted to enter a temporary password. Choose any password you can remember for the next boot — it is used only once and discarded afterwards.
+  </Step>
+
+  <Step title="Reboot and enroll the key">
+    Reboot your system and watch the boot screen carefully.
+
+    ```bash
+    sudo reboot
+    ```
+
+    During boot, the MOK management screen (a blue UEFI interface) will appear. Navigate through the prompts in this order:
+
+    1. Select **Enroll MOK**
+    2. Select **Continue**
+    3. Select **Yes**
+    4. Enter the temporary password you set in the previous step
+    5. Select **Reboot**
+
+    <Warning>
+      If you miss the MOK management window, the module will not load. Re-run `sudo mokutil --import /var/lib/dkms/mok.pub`, set a new temporary password, and reboot again. The blue screen will appear on the next boot.
+    </Warning>
+  </Step>
+</Steps>
+
+After the system comes back up, the i915-sriov-dkms module will load normally with Secure Boot active. You do not need to repeat this process unless you reinstall DKMS or regenerate the MOK key.

@@ -1,80 +1,176 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quickstart: install and configure i915 SR-IOV DKMS"
+description: "Install i915 SR-IOV DKMS, configure kernel parameters for i915 or xe, create Virtual Functions, and verify GPU passthrough is working on Linux."
 ---
 
-## Get started in three steps
+This guide walks you through the fastest path to a working SR-IOV setup on a supported Linux host. You will install the `i915-sriov-dkms` module, configure kernel parameters to enable SR-IOV on the physical GPU, create Virtual Functions, and verify that the VFs appear on the PCI bus and in the kernel log.
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Install prerequisites">
+    Install the kernel headers for your running kernel along with the DKMS framework and build tools.
 
-### Step 1: Set up your local environment
+    <Tabs>
+      <Tab title="Debian / Ubuntu">
+        ```bash
+        sudo apt update
+        sudo apt install build-essential dkms git linux-headers-$(uname -r)
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo pacman -S base-devel dkms git linux-headers
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Install the DKMS module">
+    <Tabs>
+      <Tab title="Debian / Ubuntu (.deb)">
+        Download and install the pre-built `.deb` package from the [GitHub releases page](https://github.com/strongtz/i915-sriov-dkms/releases). Replace the filename with the current release version:
 
-### Step 2: Deploy your changes
+        ```bash
+        sudo dpkg -i i915-sriov-dkms_2026.03.05_amd64.deb
+        ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+        DKMS will automatically build the module for your running kernel after installation.
+      </Tab>
+      <Tab title="Manual (git)">
+        Clone the repository and add it as a DKMS source, then build and install:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+        ```bash
+        git clone https://github.com/strongtz/i915-sriov-dkms.git
+        sudo dkms add ./i915-sriov-dkms
+        sudo dkms install i915-sriov-dkms/2026.03.05
+        ```
+      </Tab>
+      <Tab title="Arch Linux (AUR)">
+        Install from the AUR using your preferred AUR helper:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+        ```bash
+        yay -S i915-sriov-dkms
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
 
-### Step 3: Go live
+  <Step title="Set kernel parameters">
+    Add the appropriate parameters to your bootloader. Choose whether you want to use the `i915` driver or the `xe` driver.
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    <Warning>
+      The `xe` driver does **not** support Meteor Lake (MTL) or Lunar Lake (LNL) GPUs. Use the `i915` parameters if you have one of these platforms.
+    </Warning>
 
-## Next steps
+    <Tabs>
+      <Tab title="i915 driver">
+        ```
+        intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe
+        ```
 
-Now that you have your docs running, explore these key features:
+        - `intel_iommu=on` — enables the IOMMU required for VF isolation
+        - `i915.enable_guc=3` — enables GuC submission, required for SR-IOV on i915
+        - `i915.max_vfs=7` — allocates resources for up to 7 Virtual Functions
+        - `module_blacklist=xe` — prevents the xe driver from loading alongside i915
+      </Tab>
+      <Tab title="xe driver">
+        First, find your GPU's device ID:
 
-<CardGroup cols={2}>
+        ```bash
+        cat /sys/devices/pci0000:00/0000:00:02.0/device
+        ```
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+        Then set the kernel parameters, replacing `${device_id}` with the output of the command above:
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+        ```
+        intel_iommu=on xe.max_vfs=7 xe.force_probe=${device_id} module_blacklist=i915
+        ```
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+        - `intel_iommu=on` — enables the IOMMU required for VF isolation
+        - `xe.max_vfs=7` — allocates resources for up to 7 Virtual Functions
+        - `xe.force_probe=${device_id}` — force-enables probe for your specific GPU
+        - `module_blacklist=i915` — prevents the i915 driver from loading alongside xe
+      </Tab>
+    </Tabs>
+  </Step>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+  <Step title="Update the bootloader and initramfs">
+    Apply the kernel parameters you added and regenerate your initramfs so the changes take effect on next boot.
 
-</CardGroup>
+    <Tabs>
+      <Tab title="GRUB (Debian / Ubuntu)">
+        Open `/etc/default/grub` and append the parameters to `GRUB_CMDLINE_LINUX_DEFAULT`, then update GRUB and regenerate initramfs:
+
+        ```bash
+        sudo update-grub
+        sudo update-initramfs -u
+        ```
+      </Tab>
+      <Tab title="GRUB (Arch Linux)">
+        Open `/etc/default/grub`, append the parameters to `GRUB_CMDLINE_LINUX_DEFAULT`, then:
+
+        ```bash
+        sudo grub-mkconfig -o /boot/grub/grub.cfg
+        sudo mkinitcpio -P
+        ```
+      </Tab>
+      <Tab title="systemd-boot">
+        Open the loader entry file for your kernel (typically under `/boot/loader/entries/`) and append the parameters to the `options` line:
+
+        ```conf
+        options root=... rw intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe
+        ```
+
+        No additional command is needed — systemd-boot reads the file on each boot.
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Enable Virtual Functions at boot">
+    Configure the system to create VFs automatically each time it boots. The sysfs path below assumes your Intel GPU is at PCI address `0000:00:02.0`, which is standard on most systems.
+
+    <Tabs>
+      <Tab title="sysfsutils (Debian / Ubuntu)">
+        Install sysfsutils and add a rule to create 7 VFs at boot:
+
+        ```bash
+        sudo apt install sysfsutils
+        echo "devices/pci0000:00/0000:00:02.0/sriov_numvfs = 7" | sudo tee -a /etc/sysfs.conf
+        ```
+      </Tab>
+      <Tab title="tmpfiles.d (Arch Linux / systemd)">
+        Create a tmpfiles rule that writes to the sysfs VF count node at boot:
+
+        ```bash
+        echo 'w /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs - - - - 7' | \
+          sudo tee /etc/tmpfiles.d/i915-sriov-numvfs.conf
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Reboot and verify">
+    Reboot your system, then confirm that the VFs have been created and the module loaded correctly.
+
+    Check the kernel log for i915 SR-IOV messages:
+
+    ```bash
+    sudo dmesg | grep i915
+    ```
+
+    List PCI devices to confirm the VFs appear:
+
+    ```bash
+    lspci -nnk | grep -A2 "VGA\|Display"
+    ```
+
+    You should see the Physical Function (PF) at `00:02.0` and up to 7 Virtual Functions listed below it (e.g., `00:02.1` through `00:02.7`).
+
+    <Warning>
+      The Physical Function (`00:02.0`) must **never** be passed through to a VM. Only pass individual Virtual Functions to guests. Passing the PF to a VM will break host GPU access and can destabilize the system.
+    </Warning>
+  </Step>
+</Steps>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  You must also install `i915-sriov-dkms` on every guest VM that will use a Virtual Function. The guest kernel needs the patched i915 or xe module to communicate with the VF. See the [Linux guest installation](/install/linux-guest) guide for details.
 </Note>

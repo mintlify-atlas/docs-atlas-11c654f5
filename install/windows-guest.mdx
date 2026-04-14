@@ -1,0 +1,122 @@
+---
+title: "Set up a Windows 11 VM with Intel GPU VF passthrough"
+description: "How to configure a Windows 11 VM in Proxmox to use an Intel GPU Virtual Function, including EFI firmware extraction and driver installation."
+---
+
+This guide walks you through setting up a Windows 11 guest VM in Proxmox to use an Intel GPU Virtual Function (VF). Because Windows requires a GOP (Graphics Output Protocol) EFI driver for early boot graphics, you must first extract the firmware from a motherboard BIOS image and place it on the Proxmox host before attaching the VF to the VM. Once the VF is attached with the correct ROM file, you can install any version of the Intel graphics driver without encountering Code 43.
+
+## Extract graphics EFI firmware
+
+<Steps>
+  <Step title="Download UEFITool">
+    Download [UEFITool](https://github.com/LongSoft/UEFITool/releases) for your operating system. The Windows build is `UEFITool_NE_A68_win64`; Linux and macOS binaries are also available in the same release.
+  </Step>
+
+  <Step title="Download your motherboard BIOS">
+    Download the BIOS image for your motherboard from the manufacturer's website. Any Alder Lake or Raptor Lake desktop platform BIOS should work. The BIOS file is typically a `.cap` archive that you will need to unzip.
+  </Step>
+
+  <Step title="Search for the Intel GOP driver in UEFITool">
+    Open UEFITool (run as Administrator on Windows) and load the BIOS file. Then open the search dialog with `Ctrl+F` or via **Action → Search**, select the **Hex** tab, and paste this hex string:
+
+    ```
+    49006e00740065006c00280052002900200047004f0050002000440072006900760065007200
+    ```
+
+    Double-click the result in the search panel at the bottom to highlight the matching entry in the BIOS tree.
+  </Step>
+
+  <Step title="Extract the GOP driver body">
+    Right-click the highlighted entry and choose **Extract body...**. Save the file — the name and extension do not matter at this stage. For example, save it as `intelgopdriver_desktop.bin`.
+  </Step>
+
+  <Step title="Verify the checksum">
+    Confirm the file is correct by comparing its SHA256 hash.
+
+    On Windows:
+
+    ```powershell
+    Get-FileHash -Path "path\to\intelgopdriver_desktop.bin" -Algorithm SHA256
+    ```
+
+    On Linux:
+
+    ```bash
+    sha256sum intelgopdriver_desktop.bin
+    ```
+
+    Expected hashes:
+
+    | Platform | SHA256 |
+    |---|---|
+    | Desktop UHD 730 / UHD 770 | `131c32cadb6716dba59d13891bb70213c6ee931dd1e8b1a5593dee6f3a4c2cbd` |
+    | ADL-N | `FA12486D93BEE383AD4D3719015EFAD09FC03352382F17C63DF10B626755954B` |
+  </Step>
+
+  <Step title="Copy the firmware file to the Proxmox host">
+    Place the file in `/usr/share/kvm` on your Proxmox host. You can upload it to a network share and use `wget`, or transfer it with `scp`:
+
+    ```bash
+    scp intelgopdriver_desktop.bin root@<proxmox-host>:/usr/share/kvm/Intelgopdriver_desktop.efi
+    ```
+
+    Note that Proxmox expects the `romfile` path to be relative to `/usr/share/kvm`, so the filename you use here is what you will reference in the VM configuration.
+  </Step>
+</Steps>
+
+## Windows VM creation and configuration
+
+<Steps>
+  <Step title="Create the VM and set CPU type to host">
+    When creating the VM in Proxmox, set the **CPU** type to `host`. This exposes the full instruction set to the guest and is required for correct GPU driver operation.
+  </Step>
+
+  <Step title="Install Windows 11">
+    Proceed with the Windows 11 installation. To skip the mandatory Microsoft Account setup during OOBE, press `Shift+F10` at the first setup screen to open a command prompt and run:
+
+    ```
+    OOBE\BYPASSNRO
+    ```
+
+    The VM will reboot and return you to the setup screen, where you can choose **I don't have Internet** to create a local account instead.
+  </Step>
+
+  <Step title="Enable Remote Desktop before attaching the GPU">
+    Once Windows is installed and you are at the desktop, enable Remote Desktop in **Settings → System → Remote Desktop** and ensure your local account has access. This is essential — after you attach the VF and set Display to `none`, the Proxmox console will be unavailable and RDP will be your only way into the VM.
+
+    You can shut down the VM after enabling Remote Desktop.
+  </Step>
+
+  <Step title="Edit the VM configuration to attach the VF">
+    With the VM powered off, edit its configuration file on the Proxmox host (or use the **Hardware** tab in the Proxmox web UI). Add the VF as a PCI device with the romfile you copied earlier:
+
+    ```ini
+    # Pass through VF 02.1, specifying the GOP ROM file (path is relative to /usr/share/kvm)
+    hostpci0: 0000:00:02.1,pcie=1,romfile=Intelgopdriver_desktop.efi,x-vga=1
+    ```
+
+    Replace `0000:00:02.1` with the PCI address of the VF you want to assign.
+  </Step>
+
+  <Step title="Set Display to none">
+    In the **Hardware** tab, set the **Display** device to `none`.
+
+    <Warning>
+      Once you set Display to `none` and start the VM with the GPU attached, the Proxmox console will show a blank screen. You will have no console access — RDP is your only way to connect. Make sure Remote Desktop is enabled and working before taking this step.
+    </Warning>
+  </Step>
+
+  <Step title="Start the VM and install the Intel graphics driver">
+    Start the VM and connect via Remote Desktop. Download the Intel graphics driver from [Intel's download center](https://www.intel.com/content/www/us/en/download-center/home.html).
+
+    <Note>
+      Any version of the Intel graphics driver should work. Because the GOP EFI ROM is correctly configured, you will not encounter the `Code 43` error that typically affects improperly configured GPU passthrough setups.
+    </Note>
+
+    During installation you may see a black screen over RDP while the new display driver is applied. This is normal — wait a few minutes. You can monitor the VM's CPU usage in the Proxmox dashboard to gauge when activity has settled, then reconnect via RDP.
+  </Step>
+
+  <Step title="Verify the driver in Device Manager">
+    After the VM reboots, reconnect via RDP. Open **Device Manager** and confirm that the Intel Graphics device shows as installed and working with no error codes.
+  </Step>
+</Steps>

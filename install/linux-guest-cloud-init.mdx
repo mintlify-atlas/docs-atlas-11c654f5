@@ -1,0 +1,84 @@
+---
+title: "i915 SR-IOV on a Proxmox Ubuntu Cloud-Init guest VM"
+description: "Fix the Unknown symbol in module error when installing i915 SR-IOV DKMS on a minimal Ubuntu Cloud-Init VM by installing linux-modules-extra."
+---
+
+Minimal and cloud-init Ubuntu images — including VMs created with Proxmox VE Community Scripts — do not ship with the full set of kernel modules. Specifically, they omit `drm_display_helper` and `drm_kms_helper`, which the `i915-sriov-dkms` module depends on. When you install the module on one of these images without addressing this gap, loading i915 silently fails with an `Unknown symbol in module` error. The fix is straightforward: install `linux-modules-extra` alongside the usual build tools, and edit the cloud-init-specific GRUB configuration file rather than the default one.
+
+<Warning>
+  Cloud-init overrides `/etc/default/grub` with its own settings stored in `/etc/default/grub.d/50-cloudimg-settings.cfg`. If you edit `/etc/default/grub` directly, your kernel parameter changes will be ignored. Always edit the cloud-init file instead.
+</Warning>
+
+<Steps>
+  <Step title="Install required packages including linux-modules-extra">
+    Unlike a standard Ubuntu installation, you must explicitly install `linux-modules-extra` to provide the DRM helper modules that i915 depends on:
+
+    ```bash
+    sudo apt install -y build-essential dkms linux-headers-$(uname -r) linux-modules-extra-$(uname -r)
+    ```
+  </Step>
+
+  <Step title="Download and install the DKMS module">
+    Download the pre-built Debian package for version 2026.03.05 and install it:
+
+    ```bash
+    wget -O /tmp/i915-sriov-dkms_2026.03.05_amd64.deb \
+      "https://github.com/strongtz/i915-sriov-dkms/releases/download/2026.03.05/i915-sriov-dkms_2026.03.05_amd64.deb"
+    sudo dpkg -i /tmp/i915-sriov-dkms_2026.03.05_amd64.deb
+    ```
+  </Step>
+
+  <Step title="Update kernel parameters in the cloud-init GRUB config">
+    Open the cloud-init GRUB configuration file — **not** `/etc/default/grub`:
+
+    ```bash
+    sudo nano /etc/default/grub.d/50-cloudimg-settings.cfg
+    ```
+
+    Set `GRUB_CMDLINE_LINUX_DEFAULT` to the following value. The `console=tty1 console=ttyS0` entries are the cloud-init defaults; keep them so serial console access is preserved:
+
+    ```bash
+    GRUB_CMDLINE_LINUX_DEFAULT="console=tty1 console=ttyS0 i915.enable_guc=3 module_blacklist=xe"
+    ```
+  </Step>
+
+  <Step title="Apply GRUB and initramfs changes, then reboot">
+    Regenerate the GRUB configuration and the initial RAM filesystem, then restart the VM:
+
+    ```bash
+    sudo update-grub && sudo update-initramfs -u && sudo reboot
+    ```
+  </Step>
+
+  <Step title="Verify VF recognition">
+    After the VM reboots, check the kernel log to confirm i915 loaded and recognized the Virtual Function:
+
+    ```bash
+    sudo dmesg | grep i915
+    ```
+
+    You should see output similar to:
+
+    ```
+    i915: You are using the i915-sriov-dkms module, a ported version of the i915/xe module with SR-IOV support.
+    ```
+
+    If this line is absent, confirm that `module_blacklist=xe` and `i915.enable_guc=3` are present in the active kernel command line by running `cat /proc/cmdline`, and verify that `linux-modules-extra-$(uname -r)` is installed.
+  </Step>
+</Steps>
+
+This procedure was tested with an **Intel Core i5-13500T** (Alder Lake) processor.
+
+## Uninstallation
+
+Remove the package with:
+
+```bash
+sudo dpkg -P i915-sriov-dkms
+```
+
+If you installed the module manually, or if the package manager fails to remove it from the kernel tree, remove it forcibly with DKMS:
+
+```bash
+sudo dkms remove i915-sriov-dkms/2026.03.05
+```

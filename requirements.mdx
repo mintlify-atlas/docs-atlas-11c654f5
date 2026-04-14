@@ -1,0 +1,76 @@
+---
+title: "System requirements and compatibility for i915 SR-IOV"
+description: "Check kernel version requirements, supported architectures, host and guest OS compatibility, and build dependencies before installing i915 SR-IOV DKMS."
+---
+
+Before installing `i915-sriov-dkms`, verify that your kernel version, CPU/GPU generation, and host operating system are supported. The module has strict kernel version constraints enforced at build time, and only runs on x86_64 hardware.
+
+## Kernel version
+
+The current version of `i915-sriov-dkms` supports kernels **6.12.x through 6.19.x**. This range is enforced in `dkms.conf` via `BUILD_EXCLUSIVE_KERNEL="^6\.1[2-9]"` — DKMS will refuse to build the module outside this range.
+
+| Kernel range | Where to get it |
+|---|---|
+| **6.12 – 6.19** | This repository (current, actively maintained) |
+| 6.8 – 6.12 | [2025.07.22 release](https://github.com/strongtz/i915-sriov-dkms/releases/tag/2025.07.22) |
+| 6.1 – 6.7 | [intel-lts-v6.1 branch](https://github.com/strongtz/i915-sriov-dkms/tree/intel-lts-v6.1) |
+
+<Note>
+  Older branches (6.1–6.12) are no longer actively maintained. Upgrading to a kernel in the 6.12–6.19 range is strongly recommended.
+</Note>
+
+## Architecture
+
+Only **x86_64** is supported. ARM and other architectures are not supported.
+
+## Supported host operating systems
+
+The module has been tested and documented for the following host distributions:
+
+| Distribution | Notes |
+|---|---|
+| Arch Linux | Fully supported; AUR package available |
+| Proxmox PVE 9.1 | Fully supported; `.deb` package available |
+| NixOS | Supported via a native NixOS flake module |
+| Debian / Ubuntu | Supported via manual installation or `.deb` package |
+| Generic Linux | Any distro with a supported kernel and DKMS |
+
+## Supported guest operating systems
+
+| Guest OS | Notes |
+|---|---|
+| Ubuntu 25.04 (kernel 6.14) | Tested Linux guest |
+| Windows 11 (24H2) | Tested with Proxmox 8.3 and Intel Driver 32.0.101.6460 / 32.0.101.6259 |
+
+## i915 vs xe driver compatibility
+
+The module provides both the `i915` and `xe` drivers. Which one to use depends on your GPU generation:
+
+<Warning>
+  The `xe` driver does **not** support **MTL (Meteor Lake)** or **LNL (Lunar Lake)** platforms. If you have one of these GPUs, you must use the `i915` driver instead.
+</Warning>
+
+For all other supported Intel integrated GPUs (e.g., Intel UHD Graphics on 11th–13th gen), both drivers are available and you can choose based on your preference or stability needs.
+
+## Secure Boot
+
+Loading out-of-tree kernel modules requires Secure Boot to be **disabled**, or the module to be signed with a Machine Owner Key (MOK) that is enrolled in your UEFI firmware. If you need Secure Boot, follow the [UEFI Secure Boot Enabled Configuration](/configuration/secure-boot) guide to sign and enroll the module after installation.
+
+## Build dependencies
+
+You need the following packages installed on the host before building:
+
+<Tabs>
+  <Tab title="Debian / Ubuntu">
+    ```bash
+    sudo apt install build-essential dkms git linux-headers-$(uname -r)
+    ```
+  </Tab>
+  <Tab title="Arch Linux">
+    ```bash
+    sudo pacman -S base-devel dkms git linux-headers
+    ```
+  </Tab>
+</Tabs>
+
+The `dkms` package manages the build lifecycle. The `linux-headers` package (matching your running kernel) provides the kernel source tree needed to compile the module.

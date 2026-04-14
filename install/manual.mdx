@@ -1,0 +1,197 @@
+---
+title: "Manual i915 SR-IOV DKMS install on Debian, Ubuntu, Arch"
+description: "How to manually install i915 SR-IOV DKMS by cloning the repo and using dkms commands on Debian, Ubuntu, or Arch Linux hosts without pre-built packages."
+---
+
+Manual installation is the right approach when no pre-built package is available for your distribution or kernel version, or when you want full control over the build process. This guide applies to Debian, Ubuntu, and Arch Linux hosts. Where commands differ between distributions, tabs show the appropriate variant for each.
+
+## Installation
+
+<Steps>
+  <Step title="Install build tools">
+    Install the packages needed to compile DKMS modules and clone the repository:
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu">
+        ```bash
+        sudo apt install build-essential dkms git
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo pacman -S base-devel dkms git
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install kernel headers">
+    Install the header package that matches your currently running kernel:
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu">
+        ```bash
+        sudo apt install linux-headers-$(uname -r)
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo pacman -S linux-headers
+        ```
+
+        Replace `linux-headers` with `linux-zen-headers` or `linux-lts-headers` if you are running a non-default kernel variant.
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Clone the repository">
+    Clone the i915-sriov-dkms repository to your local machine:
+
+    ```bash
+    git clone https://github.com/strongtz/i915-sriov-dkms.git
+    ```
+  </Step>
+
+  <Step title="Add the module to DKMS">
+    Register the source directory with DKMS:
+
+    ```bash
+    sudo dkms add ./i915-sriov-dkms
+    ```
+  </Step>
+
+  <Step title="Build and install with DKMS">
+    Build the module and install it against your running kernel:
+
+    ```bash
+    sudo dkms install i915-sriov-dkms/2026.03.05
+    ```
+
+    DKMS will compile the module and place it in the appropriate location under `/lib/modules`.
+  </Step>
+
+  <Step title="Handle Secure Boot (if applicable)">
+    If `dkms install` reports that it created a self-signed Machine Owner Key (MOK) certificate and you have not yet enrolled it, import the certificate so the signed module can be loaded:
+
+    ```bash
+    sudo mokutil --import /var/lib/dkms/mok.pub
+    ```
+
+    You will be prompted to set a one-time password. On the next reboot, the UEFI MOK manager will ask you to enroll the key using the password you set.
+
+    For full Secure Boot instructions, see the [Secure Boot setup guide](/configuration/secure-boot).
+  </Step>
+
+  <Step title="Set kernel parameters in GRUB">
+    Open the GRUB configuration file:
+
+    ```bash
+    sudo nano /etc/default/grub
+    ```
+
+    Set `GRUB_CMDLINE_LINUX_DEFAULT` to include the required SR-IOV parameters. If you already have other arguments in this variable, append to them rather than replacing:
+
+    ```bash
+    GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe"
+    ```
+
+    <Tip>
+      You can use the `xe` driver instead of `i915` by substituting `xe.max_vfs=7 xe.force_probe=<device_id> module_blacklist=i915`. Note that `xe` does not support Meteor Lake (MTL) or Lunar Lake (LNL) platforms.
+    </Tip>
+  </Step>
+
+  <Step title="Update GRUB and initramfs">
+    Apply the GRUB configuration and rebuild the initramfs:
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu">
+        ```bash
+        sudo update-grub
+        sudo update-initramfs -u
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo grub-mkconfig -o /boot/grub/grub.cfg
+        sudo mkinitcpio -P
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Enable VFs on boot (optional)">
+    To automatically create VFs every time the system boots, use `sysfsutils`.
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu">
+        ```bash
+        sudo apt install sysfsutils
+        echo "devices/pci0000:00/0000:00:02.0/sriov_numvfs = 7" | sudo tee -a /etc/sysfs.conf
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        Install `sysfsutils` from the AUR if available, or use `systemd-tmpfiles` instead. Edit `/etc/tmpfiles.d/i915-set-sriov-numvfs.conf` and uncomment the `w` line, setting the argument to your desired VF count:
+
+        ```conf
+        w /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs -    -    -    -   7
+        ```
+      </Tab>
+    </Tabs>
+
+    <Note>
+      Adjust the PCI address (`0000:00:02.0`) if your GPU appears at a different address. Run `lspci | grep -i vga` to confirm the correct address.
+    </Note>
+  </Step>
+
+  <Step title="Reboot">
+    Reboot the host to apply the new kernel parameters and load the DKMS module:
+
+    ```bash
+    sudo reboot
+    ```
+  </Step>
+</Steps>
+
+## Optional configurations
+
+### Block VFs on the host
+
+Leaving VFs visible to the host can cause system instability and driver conflicts. Because VFs serve no functional purpose on the host itself, it is strongly recommended that you block them. Follow the [Block VFs setup guide](/configuration/block-vfs) to apply this configuration.
+
+### Secure Boot
+
+If your environment requires UEFI Secure Boot, follow the [Secure Boot setup guide](/configuration/secure-boot). This applies to Ubuntu, Proxmox VE, and other Debian-based distributions. Arch Linux users should refer to the Arch Wiki.
+
+## Uninstallation
+
+Use the command that matches how you installed the package or its dependencies:
+
+<Tabs>
+  <Tab title="dpkg (Debian / Ubuntu)">
+    If you later installed a `.deb` package on top of a manual clone, remove it with:
+
+    ```bash
+    sudo dpkg -P i915-sriov-dkms
+    ```
+  </Tab>
+  <Tab title="pacman (Arch Linux)">
+    If you installed the AUR package or a pre-built `.pkg.tar.zst`:
+
+    ```bash
+    sudo pacman -R i915-sriov-dkms
+    ```
+  </Tab>
+  <Tab title="DKMS (manual)">
+    If you registered the module manually with `dkms add`, remove it with:
+
+    ```bash
+    sudo dkms remove i915-sriov-dkms/2026.03.05
+    ```
+
+    Then delete the cloned source directory:
+
+    ```bash
+    sudo rm -rf /usr/src/i915-sriov-dkms-2026.03.05
+    ```
+  </Tab>
+</Tabs>

@@ -1,0 +1,148 @@
+---
+title: "Install i915 SR-IOV DKMS on Proxmox VE 9.1 hosts"
+description: "Complete setup guide for i915 SR-IOV DKMS on Proxmox VE 9.1 hosts, covering kernel installation, GRUB configuration, and GPU VF passthrough to VMs."
+---
+
+This guide covers the full installation of the i915 SR-IOV DKMS module on a Proxmox VE 9.1 host. After completing these steps, your Intel integrated GPU will create Virtual Functions (VFs) that you can pass through to LXC containers or virtual machines. The module is distributed as a Debian `.deb` package and integrates with the standard DKMS workflow on Proxmox.
+
+<Warning>
+  This module is highly experimental. Only proceed if you understand the risks involved. You must install the DKMS module in **both the host and each guest** that will use a VF.
+</Warning>
+
+## Installation
+
+<Steps>
+  <Step title="Install build tools">
+    Install the packages required to compile DKMS modules:
+
+    ```bash
+    apt install build-essential dkms
+    ```
+  </Step>
+
+  <Step title="Install the Proxmox kernel and headers">
+    Install the default Proxmox kernel and its matching header package. This installs an unsigned kernel, which is required for loading out-of-tree modules without Secure Boot:
+
+    ```bash
+    apt install proxmox-default-kernel proxmox-default-headers
+    ```
+
+    <Note>
+      If you need Secure Boot support, follow the [Secure Boot setup guide](/configuration/secure-boot) before proceeding.
+    </Note>
+  </Step>
+
+  <Step title="Download the .deb package">
+    Download the pre-built Debian package from the GitHub releases page:
+
+    ```bash
+    wget -O /tmp/i915-sriov-dkms_2026.03.05_amd64.deb \
+      "https://github.com/strongtz/i915-sriov-dkms/releases/download/2026.03.05/i915-sriov-dkms_2026.03.05_amd64.deb"
+    ```
+  </Step>
+
+  <Step title="Install the package with dpkg">
+    Install the downloaded package. DKMS will build the kernel module against your installed headers automatically:
+
+    ```bash
+    dpkg -i /tmp/i915-sriov-dkms_2026.03.05_amd64.deb
+    ```
+  </Step>
+
+  <Step title="Set kernel parameters in GRUB">
+    Open the GRUB configuration file:
+
+    ```bash
+    nano /etc/default/grub
+    ```
+
+    Set `GRUB_CMDLINE_LINUX_DEFAULT` to include the required SR-IOV parameters. If you already have other arguments in this variable, append to them rather than replacing:
+
+    ```bash
+    GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe"
+    ```
+
+    <Tip>
+      You can use the `xe` driver instead of `i915` by substituting `xe.max_vfs=7 xe.force_probe=<device_id> module_blacklist=i915`. Note that `xe` does not support Meteor Lake (MTL) or Lunar Lake (LNL) platforms. See the [Kernel Parameters](/configuration/kernel-parameters) reference for full details.
+    </Tip>
+  </Step>
+
+  <Step title="Update GRUB and initramfs">
+    Apply the GRUB changes and rebuild the initramfs:
+
+    ```bash
+    update-grub
+    update-initramfs -u
+    ```
+  </Step>
+
+  <Step title="Pin kernel version (optional)">
+    To prevent the kernel from being automatically upgraded to a version that may not match your installed DKMS module, pin the current kernel version with `proxmox-boot-tool`:
+
+    ```bash
+    proxmox-boot-tool kernel pin $(uname -r)
+    proxmox-boot-tool refresh
+    ```
+
+    You can unpin later with `proxmox-boot-tool kernel unpin`.
+  </Step>
+
+  <Step title="Enable VFs with sysfsutils">
+    Install `sysfsutils` and add an entry to `/etc/sysfs.conf` to enable VFs automatically on every boot. Replace `7` with the number of VFs you want (maximum 7):
+
+    ```bash
+    apt install sysfsutils
+    echo "devices/pci0000:00/0000:00:02.0/sriov_numvfs = 7" >> /etc/sysfs.conf
+    ```
+
+    <Note>
+      Adjust the PCI address (`0000:00:02.0`) if your GPU appears at a different address. Run `lspci | grep -i vga` to confirm.
+    </Note>
+  </Step>
+
+  <Step title="Reboot">
+    Reboot the host to apply the new kernel parameters, load the DKMS module, and create the VFs:
+
+    ```bash
+    reboot
+    ```
+  </Step>
+
+  <Step title="Verify VFs are present">
+    After the system comes back up, verify that the VFs have been created. You should see entries for `02:00.1` through `02:00.7` (or however many VFs you configured):
+
+    ```bash
+    lspci -nnk | grep -A 3 "VGA\|Display"
+    ```
+
+    You can now pass the VF devices through to LXC containers or VMs in the Proxmox UI.
+
+    <Warning>
+      Never pass the Physical Function (PF, address `02:00.0`) to a virtual machine. Doing so will crash all other VFs and destabilize the host. Only pass the VF devices (`02:00.1` through `02:00.7`) to guests.
+    </Warning>
+  </Step>
+</Steps>
+
+## Optional configurations
+
+### Block VFs on the host
+
+Leaving VFs visible to the host can cause system instability and driver conflicts. Because VFs serve no functional purpose on the host itself, it is strongly recommended that you block them. Follow the [Block VFs setup guide](/configuration/block-vfs) to apply this configuration.
+
+### Secure Boot
+
+If your environment requires UEFI Secure Boot, you must sign the DKMS module before it can be loaded. Follow the [Secure Boot setup guide](/configuration/secure-boot) for instructions specific to Proxmox and Debian-based distributions.
+
+## Uninstallation
+
+Remove the package with `dpkg`:
+
+```bash
+dpkg -P i915-sriov-dkms
+```
+
+If the package manager fails to remove the module from the kernel tree, force removal through DKMS directly:
+
+```bash
+dkms remove i915-sriov-dkms/2026.03.05
+```

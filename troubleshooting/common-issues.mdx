@@ -1,0 +1,213 @@
+---
+title: "Troubleshooting common i915 SR-IOV DKMS issues and errors"
+description: "Solutions for common problems including boot hangs, black screen, Unknown symbol errors, VFs not appearing, and DKMS build failures."
+---
+
+When something goes wrong with the i915 SR-IOV DKMS module, the first place to look is the kernel log. Most failures — whether the module refuses to load, a VF never appears, or the system hangs at boot — leave clear evidence in `dmesg` or the systemd journal. If the system won't boot at all, use the GRUB recovery steps below to get back to a working state before digging into the logs.
+
+<AccordionGroup>
+
+  <Accordion title="System hangs or black screen at boot">
+    If the system hangs or shows a black screen after installing the module, you need to temporarily disable the i915 and xe drivers at boot so you can get in and investigate.
+
+    **GRUB2**
+
+    1. At the GRUB boot menu, select your kernel entry and press `e` to edit the boot parameters.
+    2. Find the line beginning with `linux` and append `module_blacklist=i915,xe` to the end of it (preceded by a space).
+    3. Press **F10** or **Ctrl+X** to boot with that change.
+
+    **systemd-boot**
+
+    1. At the boot menu, press `e` to edit the kernel parameters.
+    2. Append `module_blacklist=i915,xe` to the end of the existing parameters line (preceded by a space).
+    3. Press **Enter** to boot.
+
+    Once you are back at a shell, inspect the kernel log for clues:
+
+    ```bash
+    dmesg | grep -i i915
+    journalctl -b -k | grep -i i915
+    ```
+
+    <Note>
+      These changes are temporary and only apply to the current boot. Your permanent boot configuration is unchanged.
+    </Note>
+  </Accordion>
+
+  <Accordion title='"Unknown symbol in module" error in guest VM'>
+    If `i915` silently fails to load inside a guest VM and `dmesg` shows `Unknown symbol in module`, the guest kernel is missing the DRM helper modules that i915-sriov-dkms depends on — specifically `drm_display_helper` and `drm_kms_helper`.
+
+    This is common with minimal Ubuntu images created from Proxmox VE Community Scripts or any cloud-init template, because those images do not include the full set of extra kernel modules by default.
+
+    **Fix:** install `linux-modules-extra` for your running kernel before installing the DKMS package:
+
+    ```bash
+    sudo apt install -y build-essential dkms linux-headers-$(uname -r) linux-modules-extra-$(uname -r)
+    ```
+
+    Then proceed with the normal DKMS installation. For the complete walkthrough including the cloud-init GRUB override, see the [Linux Guest (Cloud-Init) installation guide](/install/linux-guest-cloud-init).
+  </Accordion>
+
+  <Accordion title="DKMS build fails">
+    A failed DKMS build almost always means the kernel headers for the currently running kernel are missing, or the build toolchain is incomplete.
+
+    **1. Verify kernel headers are installed:**
+
+    ```bash
+    # Debian/Ubuntu/Proxmox
+    dpkg -l | grep linux-headers
+
+    # Arch Linux
+    pacman -Q linux-headers
+    ```
+
+    The headers package version must match `uname -r`. On Arch, if you use a non-default kernel (e.g. `linux-zen`, `linux-lts`), install the matching headers package (`linux-zen-headers`, `linux-lts-headers`).
+
+    **2. Verify the build toolchain is installed:**
+
+    ```bash
+    # Debian/Ubuntu/Proxmox
+    apt install build-essential
+
+    # Arch Linux
+    pacman -S base-devel
+    ```
+
+    **3. Check the current DKMS status:**
+
+    ```bash
+    dkms status
+    ```
+
+    **4. Reinstall the module:**
+
+    ```bash
+    dkms remove i915-sriov-dkms/2026.03.05 --all
+    dkms install i915-sriov-dkms/2026.03.05
+    ```
+
+    <Warning>
+      The module will only build against kernels in the 6.12–6.19 range due to the `BUILD_EXCLUSIVE_KERNEL` restriction in `dkms.conf`. If you are running a kernel outside that range, the build will be skipped entirely. Check `uname -r` and upgrade to a supported kernel if necessary.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="VFs not appearing after reboot">
+    If no Virtual Functions appear under `lspci` after a reboot, work through these checks in order.
+
+    **1. Confirm your kernel parameters are set:**
+
+    ```bash
+    cat /proc/cmdline
+    ```
+
+    You should see `intel_iommu=on` and either `i915.max_vfs=7` (for i915) or `xe.max_vfs=7` (for xe). If they are missing, edit `/etc/default/grub` and run `update-grub`.
+
+    **2. Confirm IOMMU is active:**
+
+    ```bash
+    dmesg | grep -i iommu
+    ```
+
+    Look for a line such as `DMAR: IOMMU enabled`. If IOMMU is not enabled, the kernel parameter was not applied or your firmware has IOMMU/VT-d disabled in BIOS.
+
+    **3. Manually trigger VF creation:**
+
+    ```bash
+    echo 7 > /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs
+    ```
+
+    **4. Verify VFs appear:**
+
+    ```bash
+    lspci -nnk -s 00:02
+    ```
+
+    You should see entries for `00:02.1` through `00:02.7`.
+
+    **5. Make VF creation persistent:**
+
+    If the manual `echo` works but VFs disappear after reboot, persistence is not configured. Use `sysfsutils` on Debian/Ubuntu/Proxmox:
+
+    ```bash
+    echo "devices/pci0000:00/0000:00:02.0/sriov_numvfs = 7" > /etc/sysfs.conf
+    ```
+
+    On Arch Linux, edit `/etc/tmpfiles.d/i915-set-sriov-numvfs.conf` and uncomment the line for `sriov_numvfs`.
+  </Accordion>
+
+  <Accordion title="Module not loading after kernel update">
+    DKMS is configured with `AUTOINSTALL=yes`, so it should automatically rebuild the module for a new kernel during the package upgrade. If the module is absent after a kernel update, check whether the build actually ran:
+
+    ```bash
+    dkms status
+    ```
+
+    If the new kernel version is not listed, trigger the build manually:
+
+    ```bash
+    dkms install i915-sriov-dkms/2026.03.05
+    ```
+
+    <Warning>
+      The module only builds against kernels matching the range 6.12–6.19 (the `BUILD_EXCLUSIVE_KERNEL` regex `^6\.1[2-9]` in `dkms.conf`). If you upgraded to a kernel outside that range — for example 6.20 or later — the DKMS build will be skipped and the module will not load. Stay on a supported kernel version or wait for an updated release of this package.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="xe driver: MTL or LNL platform not working">
+    The xe driver included in this package **does not support Meteor Lake (MTL) or Lunar Lake (LNL)** platforms. If you have one of those CPUs and are using xe, you will need to switch to the i915 driver instead.
+
+    Update your kernel parameters to use i915:
+
+    ```
+    intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe
+    ```
+
+    Remove the xe-specific parameters (`xe.max_vfs`, `xe.force_probe`) and add `module_blacklist=xe` so the stock xe driver does not conflict with i915.
+
+    For the full list of required and optional kernel parameters, see the [Kernel Parameters configuration guide](/configuration/kernel-parameters).
+  </Accordion>
+
+  <Accordion title="Secure Boot: module won't load">
+    Out-of-tree kernel modules cannot be loaded when Secure Boot is active unless the module is signed with a key that is enrolled in the Machine Owner Key (MOK) database.
+
+    When you install i915-sriov-dkms with DKMS, it automatically generates a self-signed certificate and signs the built module. You still need to enroll that certificate:
+
+    **1. Import the DKMS MOK certificate:**
+
+    ```bash
+    sudo mokutil --import /var/lib/dkms/mok.pub
+    ```
+
+    You will be prompted to set a one-time password.
+
+    **2. Reboot** and watch for the blue MOK Manager enrollment screen (shim UEFI application). Select **Enroll MOK**, confirm the key, enter the password you set, and continue booting.
+
+    After enrollment the module will load normally on subsequent reboots.
+
+    For a full guide on Secure Boot configuration, see the [Secure Boot setup guide](/configuration/secure-boot).
+  </Accordion>
+
+  <Accordion title="VF exposed to host causing GUI crash or media server issues">
+    This is expected behavior. When VFs are created, the host operating system can claim them just like any other PCI device. The i915 or xe driver on the host will attach to each VF, which can cause display corruption, GUI crashes, or conflicts with media servers (e.g., Jellyfin, Plex) that try to use hardware acceleration.
+
+    VFs exist solely to be passed through to guest VMs. You should prevent the host from binding to them by assigning the VFs to the `vfio-pci` driver instead.
+
+    For step-by-step instructions on binding VFs to vfio-pci, see the [Block VFs on the Host guide](/configuration/block-vfs).
+  </Accordion>
+
+</AccordionGroup>
+
+## Reading kernel logs
+
+These commands are useful for diagnosing any of the issues above. Run them after temporarily disabling the module (if necessary) to get a clean picture of what happened during the last boot.
+
+```bash
+# Filter i915 messages
+dmesg | grep i915
+
+# Filter xe messages
+dmesg | grep xe
+
+# Broad filter covering i915, xe, IOMMU, and VFIO across the full boot log
+journalctl -b -k | grep -Ei 'i915|xe|iommu|vfio'
+```

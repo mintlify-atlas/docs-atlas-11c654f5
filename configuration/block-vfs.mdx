@@ -1,0 +1,93 @@
+---
+title: "Block GPU Virtual Functions from the host with vfio-pci"
+description: "How to bind Intel GPU Virtual Functions to vfio-pci to prevent host instability and media server conflicts while keeping the PF available."
+---
+
+When VFs are created and left visible to the host operating system, they cause a range of problems: hot-plugging or unbinding them while assigning them to KVM virtual machines can trigger a complete GUI session crash; media servers such as Emby and Plex misidentify them as usable GPUs and attempt hardware transcoding against them, producing failed jobs and initialization errors; and monitoring tools like `intel_gpu_top` may behave erratically. Because VFs serve no purpose on the host — their only job is to be passed through to guest VMs — binding them to `vfio-pci` hides them from host userspace entirely while leaving the Physical Function available for normal desktop or server use.
+
+This procedure has been tested on Arch Linux, Ubuntu, and Proxmox VE.
+
+<Steps>
+  <Step title="Enable the vfio-pci module">
+    Add `vfio-pci` to the list of modules loaded at boot:
+
+    ```bash
+    echo "vfio-pci" | sudo tee /etc/modules-load.d/vfio.conf
+    ```
+  </Step>
+
+  <Step title="Find your iGPU device ID">
+    Read the Device ID from sysfs:
+
+    ```bash
+    cat /sys/devices/pci0000:00/0000:00:02.0/device
+    ```
+
+    The output is a hex value such as `0xa7a0`. Note the part after `0x` — you will use it in the next step.
+  </Step>
+
+  <Step title="Create the udev rule">
+    The rule instructs the kernel to bind every VF (addresses `00:02.1` through `00:02.7`) to `vfio-pci` as soon as they are enumerated.
+
+    <Warning>
+      Replace `a7a0` in the command below with the actual Device ID you obtained in the previous step. Using the wrong ID means the rule will not match and VFs will remain unblocked.
+    </Warning>
+
+    ```bash
+    sudo tee /etc/udev/rules.d/99-i915-vf-vfio.rules <<EOF
+    # Bind all i915 VFs (00:02.1 to 00:02.7) to vfio-pci
+    ACTION=="add", SUBSYSTEM=="pci", KERNEL=="0000:00:02.[1-7]", ATTR{vendor}=="0x8086", ATTR{device}=="0xa7a0", DRIVER!="vfio-pci", RUN+="/bin/sh -c 'echo \$kernel > /sys/bus/pci/devices/\$kernel/driver/unbind; echo vfio-pci > /sys/bus/pci/devices/\$kernel/driver_override; modprobe vfio-pci; echo \$kernel > /sys/bus/pci/drivers/vfio-pci/bind'"
+    EOF
+    ```
+  </Step>
+
+  <Step title="Regenerate the initramfs">
+    The `vfio-pci` module must be present in the initramfs so the udev rule can fire early enough in the boot sequence.
+
+    <Tabs>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo mkinitcpio -P
+        ```
+      </Tab>
+      <Tab title="Ubuntu / Debian / Proxmox">
+        ```bash
+        sudo update-initramfs -u
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Reboot">
+    ```bash
+    sudo reboot
+    ```
+  </Step>
+
+  <Step title="Verify the driver bindings">
+    After booting, check which driver is in use for each function at `00:02`:
+
+    ```bash
+    lspci -nnk -s 00:02
+    ```
+
+    The Physical Function (`00:02.0`) should still be driven by `i915` (or `xe`). Every VF should show `vfio-pci`:
+
+    ```
+    00:02.0 VGA compatible controller: Intel Corporation ... (rev 0c)
+          Kernel driver in use: i915
+    00:02.1 Video device: Intel Corporation ... (rev 0c)
+          Kernel driver in use: vfio-pci
+    00:02.2 Video device: Intel Corporation ... (rev 0c)
+          Kernel driver in use: vfio-pci
+    ```
+  </Step>
+
+  <Step title="Confirm no VF render nodes in /dev/dri/">
+    ```bash
+    ls /dev/dri/
+    ```
+
+    You should see only `card0` and `renderD128`. If you also see `renderD130` through `renderD135`, the VFs were not successfully blocked — recheck the device ID in the udev rule and repeat from step 3.
+  </Step>
+</Steps>

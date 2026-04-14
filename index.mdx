@@ -1,97 +1,68 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "i915 SR-IOV DKMS: Intel GPU virtualization for Linux"
+description: "Enable Intel iGPU SR-IOV virtualization on Linux with this DKMS kernel module. Share your Intel GPU across up to 7 virtual machines."
 ---
 
-## Setting up
+i915 SR-IOV DKMS is a community-maintained DKMS kernel module that patches the Intel i915 and xe GPU drivers with SR-IOV (Single Root I/O Virtualization) support. It enables you to create up to 7 Virtual Functions (VFs) from a single Intel iGPU, allowing multiple virtual machines to share hardware-accelerated graphics — useful for Proxmox, KVM, and other hypervisor setups.
 
-Get your documentation site up and running in minutes.
+<Warning>
+  This module is **highly experimental** and is a community project not affiliated with Intel. Install only if you understand the risks. You must install the module on **both the host and every guest VM**.
+</Warning>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+## Choose your path
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Requirements" icon="list-check" href="/requirements">
+    Check kernel version and hardware compatibility before installing
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install and configure the module in a few steps
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Host Installation" icon="server" href="/install/arch-linux">
+    OS-specific guides for Arch Linux, Proxmox, NixOS, and more
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Guest Installation" icon="display" href="/install/linux-guest">
+    Set up Linux or Windows guests to use a passed-through VF
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What is SR-IOV?
 
-Everything you need to create world-class documentation.
+SR-IOV (Single Root I/O Virtualization) is a PCI-SIG standard that allows a single physical PCIe device — in this case an Intel integrated GPU — to present itself as multiple virtual devices. Each Virtual Function (VF) can be assigned to a separate VM, giving that VM direct hardware access for accelerated graphics, video transcoding, and compute workloads.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+This module ports SR-IOV support from Intel's internal `mainline-tracking` kernel tree back to standard kernels via DKMS, so it rebuilds automatically on kernel upgrades.
 
-## Need inspiration?
+## Key features
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<CardGroup cols={2}>
+  <Card title="i915 and xe drivers" icon="microchip">
+    Supports both the legacy i915 driver and the newer xe driver for modern Intel GPUs
+  </Card>
+  <Card title="Up to 7 virtual functions" icon="layer-group">
+    Create up to 7 VFs from a single Intel iGPU for VM passthrough
+  </Card>
+  <Card title="DKMS auto-rebuild" icon="arrows-rotate">
+    Module rebuilds automatically when you install a new kernel
+  </Card>
+  <Card title="Broad distro support" icon="linux">
+    Works on Arch Linux, Proxmox, NixOS, Ubuntu, Debian, and more
+  </Card>
+  <Card title="Secure Boot support" icon="shield-halved">
+    UEFI Secure Boot compatible via MOK key enrollment
+  </Card>
+  <Card title="NixOS flake" icon="snowflake">
+    Native NixOS flake module — no DKMS required on NixOS
+  </Card>
+</CardGroup>
+
+## Supported kernel versions
+
+| Kernel range | Branch / Release |
+|---|---|
+| 6.12 – 6.19 | This repository (current) |
+| 6.8 – 6.12 | [2025.07.22 release](https://github.com/strongtz/i915-sriov-dkms/releases/tag/2025.07.22) |
+| 6.1 – 6.7 | [intel-lts-v6.1 branch](https://github.com/strongtz/i915-sriov-dkms/tree/intel-lts-v6.1) |
+
+<Info>
+  Upgrading to a supported kernel (6.12+) is strongly recommended. Older branches are no longer actively maintained.
+</Info>

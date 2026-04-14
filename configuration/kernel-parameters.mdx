@@ -1,0 +1,95 @@
+---
+title: "Kernel parameters reference for i915 and xe SR-IOV"
+description: "Reference for all kernel command line parameters needed to enable SR-IOV with the i915 or xe driver, including IOMMU and VF count settings."
+---
+
+Kernel command line parameters must be set before SR-IOV can function. The i915 SR-IOV DKMS package provides both the `i915` and `xe` drivers — you activate one by adding its parameters and blacklisting the other. These parameters are set in your bootloader configuration (GRUB2 or systemd-boot) and take effect on the next boot.
+
+<Warning>
+  The `xe` driver does not support Meteor Lake (MTL) or Lunar Lake (LNL) platforms. If your CPU belongs to either of those generations, use the `i915` parameters instead.
+</Warning>
+
+## Parameter strings
+
+<Tabs>
+  <Tab title="i915">
+    ```bash
+    intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe
+    ```
+  </Tab>
+  <Tab title="xe">
+    ```bash
+    intel_iommu=on xe.max_vfs=7 xe.force_probe=${device_id} module_blacklist=i915
+    ```
+
+    Replace `${device_id}` with the output of:
+
+    ```bash
+    cat /sys/devices/pci0000:00/0000:00:02.0/device
+    ```
+  </Tab>
+</Tabs>
+
+## Parameter reference
+
+| Parameter | Driver | Description |
+|---|---|---|
+| `intel_iommu=on` | both | Enables the IOMMU. Required for VF passthrough to guest VMs. |
+| `i915.enable_guc=3` | i915 | Enables GuC submission mode. SR-IOV on the i915 driver requires this to be set to `3`. |
+| `i915.max_vfs=7` | i915 | Sets the maximum number of Virtual Functions the i915 driver will expose. Valid range is 1–7. |
+| `xe.max_vfs=7` | xe | Same as `i915.max_vfs` but for the xe driver. |
+| `xe.force_probe=<device_id>` | xe | Forces the xe driver to probe the iGPU device. Obtain the device ID by running `cat /sys/devices/pci0000:00/0000:00:02.0/device`. |
+| `module_blacklist=xe` | i915 setup | Prevents the xe kernel module from loading when you are using i915. |
+| `module_blacklist=i915` | xe setup | Prevents the i915 kernel module from loading when you are using xe. |
+
+<Note>
+  The `module_blacklist` parameter ensures only one driver loads at a time. Without it, both modules may attempt to claim the device, which leads to unpredictable behaviour.
+</Note>
+
+## How to set parameters
+
+<Tabs>
+  <Tab title="GRUB2">
+    <Steps>
+      <Step title="Open the GRUB configuration file">
+        Edit `/etc/default/grub` and locate the `GRUB_CMDLINE_LINUX_DEFAULT` line.
+
+        ```bash
+        sudo nano /etc/default/grub
+        ```
+      </Step>
+      <Step title="Append the parameters">
+        Add the required parameters inside the quoted string. For example, using i915:
+
+        ```conf
+        GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe"
+        ```
+      </Step>
+      <Step title="Regenerate the GRUB configuration">
+        ```bash
+        sudo update-grub
+        ```
+      </Step>
+      <Step title="Reboot">
+        Reboot for the new parameters to take effect.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="systemd-boot">
+    <Steps>
+      <Step title="Edit the loader entry">
+        You can press `e` at the systemd-boot menu to temporarily edit the kernel parameters for a single boot, or permanently edit the relevant `.conf` file under `/boot/loader/entries/`.
+      </Step>
+      <Step title="Append the parameters">
+        Add the required parameters to the end of the `options` line. For example:
+
+        ```conf
+        options root=... quiet intel_iommu=on i915.enable_guc=3 i915.max_vfs=7 module_blacklist=xe
+        ```
+      </Step>
+      <Step title="Reboot">
+        Save the file and reboot for the changes to take effect.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>

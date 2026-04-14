@@ -1,0 +1,102 @@
+---
+title: "Create and manage Intel GPU SR-IOV Virtual Functions"
+description: "How to create Intel GPU Virtual Functions manually via sysfs or configure them to appear automatically at boot using sysfsutils or systemd-tmpfiles."
+---
+
+Once the i915 SR-IOV DKMS module is installed and the required kernel parameters are set, Virtual Functions are not created automatically — you must explicitly write the desired count to a sysfs attribute. Intel UHD Graphics supports up to 7 VFs. You can create them manually for testing or configure them to appear automatically on every boot.
+
+<Info>
+  The PCI address `0000:00:02.0` is the standard address for the Intel integrated GPU on most desktop and laptop platforms. If your system uses a different address, adjust all commands accordingly.
+</Info>
+
+## Manually create VFs
+
+To create VFs immediately without rebooting, write the desired count to the `sriov_numvfs` attribute:
+
+```bash
+echo 7 > /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs
+```
+
+This takes effect immediately but does not survive a reboot.
+
+## Persist VFs across reboots
+
+Choose the method that matches your distribution.
+
+<Tabs>
+  <Tab title="systemd-tmpfiles (Arch Linux)">
+    Create the tmpfiles configuration at `/etc/tmpfiles.d/i915-set-sriov-numvfs.conf`:
+
+    ```conf
+    #Path                                              Mode UID  GID  Age Argument
+    w /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs -    -    -    -   7
+    ```
+
+    systemd-tmpfiles will write `7` to the sysfs attribute early in the boot sequence. Change the final value to the number of VFs you want.
+  </Tab>
+  <Tab title="sysfsutils (Debian/Ubuntu/Proxmox)">
+    Install sysfsutils if it is not already present:
+
+    ```bash
+    sudo apt install sysfsutils
+    ```
+
+    Then append the VF count to `/etc/sysfs.conf`:
+
+    ```bash
+    echo "devices/pci0000:00/0000:00:02.0/sriov_numvfs = 7" | sudo tee -a /etc/sysfs.conf
+    ```
+
+    The sysfsutils service writes this value at boot before the display manager starts.
+  </Tab>
+  <Tab title="NixOS">
+    Add the kernel parameter to your NixOS hardware or system configuration:
+
+    ```nix
+    boot.kernelParams = [
+      "intel_iommu=on"
+      "i915.enable_guc=3"
+      "i915.max_vfs=7"
+      "module_blacklist=xe"
+    ];
+    ```
+
+    To write the `sriov_numvfs` attribute at boot, use a systemd service or a `boot.postBootCommands` entry:
+
+    ```nix
+    boot.postBootCommands = ''
+      echo 7 > /sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs
+    '';
+    ```
+  </Tab>
+</Tabs>
+
+## Verify VFs
+
+After creating VFs (manually or after a reboot), confirm they appear as PCI devices:
+
+```bash
+lspci -nnk -s 00:02
+```
+
+You should see the Physical Function at `00:02.0` followed by VFs at `00:02.1` through `00:02.7`, each listed as a Video device:
+
+```
+00:02.0 VGA compatible controller: Intel Corporation ... (rev 0c)
+      Kernel driver in use: i915
+00:02.1 Video device: Intel Corporation ... (rev 0c)
+      Kernel driver in use: i915
+00:02.2 Video device: Intel Corporation ... (rev 0c)
+      Kernel driver in use: i915
+...
+```
+
+## Passing VFs to VMs
+
+You pass individual VFs (`00:02.1` through `00:02.7`) to guest virtual machines using your hypervisor's PCIe passthrough mechanism (for example, VFIO-PCI on KVM/QEMU or the PCI device passthrough UI in Proxmox).
+
+<Warning>
+  Never pass the Physical Function (`00:02.0`) to a VM. The PF manages all VFs; passing it to a guest will crash every VM using those VFs simultaneously and may destabilise the host.
+</Warning>
+
+If you find that VFs exposed to the host cause GUI crashes or media server conflicts, bind them to `vfio-pci` so the host ignores them. See [Block VFs from the host](/configuration/block-vfs) for step-by-step instructions.

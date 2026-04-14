@@ -1,0 +1,128 @@
+---
+title: "Uninstall the i915 SR-IOV DKMS module from your system"
+description: "How to completely remove the i915 SR-IOV DKMS module from your system using dpkg, pacman, or manual dkms remove commands and revert kernel parameters."
+---
+
+You may need to uninstall i915-sriov-dkms if you are experiencing persistent system instability you cannot resolve, if you are moving to a kernel version outside the supported 6.12–6.19 range, or if you simply want to revert to the stock in-tree i915 driver. The process involves removing the DKMS module, reverting your kernel parameters, and rebuilding the initramfs so the next boot uses the standard kernel drivers.
+
+<Steps>
+  <Step title="Remove the DKMS package">
+    Choose the method that matches how you installed the package.
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu / Proxmox">
+        Use `dpkg` to purge the package and trigger DKMS removal from all installed kernels:
+
+        ```bash
+        sudo dpkg -P i915-sriov-dkms
+        ```
+
+        <Note>
+          If `dpkg` fails to remove the module from the kernel tree (for example, if the package was installed manually rather than via `dpkg -i`), run the manual DKMS command below in addition:
+
+          ```bash
+          sudo dkms remove i915-sriov-dkms/2026.03.05 --all
+          ```
+        </Note>
+      </Tab>
+      <Tab title="Arch Linux">
+        Use `pacman` to remove the package:
+
+        ```bash
+        sudo pacman -R i915-sriov-dkms
+        ```
+
+        <Note>
+          If `pacman` fails to remove the module from the kernel tree, or if you installed the module manually, remove it with the direct DKMS command:
+
+          ```bash
+          sudo dkms remove i915-sriov-dkms/2026.03.05 --all
+          ```
+        </Note>
+      </Tab>
+      <Tab title="Manual (any distro)">
+        If you added the module with `dkms add` and `dkms install` rather than a package manager, remove it directly:
+
+        ```bash
+        # Remove for the currently running kernel only
+        sudo dkms remove i915-sriov-dkms/2026.03.05
+
+        # Remove for all installed kernels
+        sudo dkms remove i915-sriov-dkms/2026.03.05 --all
+        ```
+
+        Verify the module is gone:
+
+        ```bash
+        dkms status
+        ```
+
+        The `i915-sriov-dkms` entry should no longer appear in the output.
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Revert kernel parameters">
+    The SR-IOV kernel parameters you added during installation must be removed. If you leave them in place, the boot log will show errors about unrecognised parameters once the stock i915 driver is in use.
+
+    Open the GRUB configuration file:
+
+    ```bash
+    sudo nano /etc/default/grub
+    ```
+
+    Find `GRUB_CMDLINE_LINUX_DEFAULT` and remove the SR-IOV parameters you added (`intel_iommu=on`, `i915.enable_guc=3`, `i915.max_vfs=7`, `xe.max_vfs=7`, `xe.force_probe=...`, `module_blacklist=i915`, `module_blacklist=xe`). Restore the line to whatever it contained before installation, for example:
+
+    ```
+    GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+    ```
+
+    <Tip>
+      If you use a cloud-init Ubuntu image and edited `/etc/default/grub.d/50-cloudimg-settings.cfg` during installation, revert that file as well — changes to `/etc/default/grub` alone will be overridden by the cloud-init override file.
+    </Tip>
+
+    On Arch Linux or any system using a different bootloader, refer to the [Arch Wiki — Kernel parameters](https://wiki.archlinux.org/title/Kernel_parameters) for the correct location of your bootloader configuration.
+  </Step>
+
+  <Step title="Update GRUB">
+    Apply the reverted kernel parameters:
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu / Proxmox">
+        ```bash
+        sudo update-grub
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo grub-mkconfig -o /boot/grub/grub.cfg
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Rebuild initramfs">
+    Rebuild the initramfs so it no longer includes references to the DKMS module:
+
+    <Tabs>
+      <Tab title="Debian / Ubuntu / Proxmox">
+        ```bash
+        sudo update-initramfs -u
+        ```
+      </Tab>
+      <Tab title="Arch Linux">
+        ```bash
+        sudo mkinitcpio -P
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Reboot">
+    Reboot the system. The kernel will load the standard in-tree i915 driver. SR-IOV VFs will no longer be created, and the GPU will behave as it did before the module was installed.
+
+    ```bash
+    sudo reboot
+    ```
+  </Step>
+</Steps>

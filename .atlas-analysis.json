@@ -1,0 +1,82 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "i915 SR-IOV DKMS",
+  "projectDescription": "A DKMS kernel module that patches the Intel i915 and xe GPU drivers with SR-IOV support, enabling GPU virtualization on Linux hosts with up to 7 virtual functions.",
+  "theme": "aspen",
+  "primaryColor": "#0068B5",
+  "lightColor": "#3B9EE8",
+  "darkColor": "#004A8C",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "requirements",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Host Installation",
+            "pages": [
+              "install/arch-linux",
+              "install/proxmox",
+              "install/nixos",
+              "install/manual"
+            ]
+          },
+          {
+            "group": "Guest Installation",
+            "pages": [
+              "install/linux-guest",
+              "install/linux-guest-cloud-init",
+              "install/windows-guest"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/kernel-parameters",
+              "configuration/virtual-functions",
+              "configuration/block-vfs",
+              "configuration/secure-boot"
+            ]
+          },
+          {
+            "group": "Troubleshooting",
+            "pages": [
+              "troubleshooting/common-issues",
+              "troubleshooting/uninstall"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "SR-IOV GPU virtualization for Intel i915 and xe drivers",
+    "Support for up to 7 Virtual Functions (VFs) per Intel iGPU",
+    "DKMS-based installation for automatic kernel module rebuilding",
+    "Compatible with Linux kernel 6.12 through 6.19",
+    "Support for Arch Linux, Proxmox, NixOS, Debian/Ubuntu hosts",
+    "Linux and Windows guest VM support",
+    "UEFI Secure Boot compatibility via MOK enrollment",
+    "NixOS flake module support without DKMS"
+  ],
+  "publicApiSurface": [
+    "i915.enable_guc kernel parameter",
+    "i915.max_vfs kernel parameter",
+    "xe.max_vfs kernel parameter",
+    "xe.force_probe kernel parameter",
+    "/sys/devices/pci0000:00/0000:00:02.0/sriov_numvfs sysfs attribute",
+    "dkms add/install/remove commands",
+    "i915-set-sriov-numvfs.conf systemd-tmpfiles configuration",
+    "intel_sriov_compat kernel module",
+    "i915 kernel module (SR-IOV patched)",
+    "xe kernel module (SR-IOV patched)",
+    "kvmgt kernel module"
+  ]
+}
